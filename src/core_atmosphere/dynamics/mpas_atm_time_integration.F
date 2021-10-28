@@ -80,6 +80,9 @@ module atm_time_integration
    real (kind=RKIND), parameter, private :: seconds_per_day = 86400.0_RKIND
 
 
+   ! switch for reference state use in vertically implicit acoustic solve coefficients
+   logical, private :: reference_state_active
+
    contains
 
 
@@ -110,6 +113,11 @@ module atm_time_integration
       type (field2DReal), pointer :: tend_ru_physicsField, tend_rtheta_physicsField, tend_rho_physicsField
 #endif
 
+      ! Used to check for non-zero reference state
+      type (mpas_pool_type), pointer :: diag
+      real (kind=RKIND), dimension(:,:), pointer :: rho_base, theta_base
+      real (kind=RKIND) :: rho_base_min, rho_base_max, theta_base_min, theta_base_max
+
 
 #ifdef MPAS_CAM_DYCORE
       nullify(tend_physics)
@@ -125,6 +133,26 @@ module atm_time_integration
       call mpas_allocate_scratch_field(tend_ru_physicsField)
 #endif
 
+      nullify(diag)
+      call mpas_pool_get_subpool(domain % blocklist % structs, 'diag', diag)
+      call mpas_pool_get_array(diag, 'rho_base', rho_base)
+      call mpas_pool_get_array(diag, 'theta_base', theta_base)
+      rho_base_min = minval(rho_base(:,:))
+      rho_base_max = maxval(rho_base(:,:))
+      theta_base_min = minval(theta_base(:,:))
+      theta_base_max = maxval(theta_base(:,:))
+
+      reference_state_active = .true.
+      if( (rho_base_min == 0.)   .and. &
+          (rho_base_max == 0.)   .and. &
+          (theta_base_min == 0.) .and. &
+          (theta_base_max == 0.) )  then
+
+         reference_state_active = .false.
+         call mpas_log_write('--- full variable integration, reference state is zero ')
+      else
+         call mpas_log_write('--- perturbation state integration, reference state is non-zero ')
+      end if
 
    end subroutine mpas_atm_dynamics_init
 
