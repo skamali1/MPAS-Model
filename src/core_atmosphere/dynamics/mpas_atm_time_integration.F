@@ -116,7 +116,6 @@ module atm_time_integration
       ! Used to check for non-zero reference state
       type (mpas_pool_type), pointer :: diag
       real (kind=RKIND), dimension(:,:), pointer :: rho_base, theta_base
-      real (kind=RKIND) :: rho_base_min, rho_base_max, theta_base_min, theta_base_max
 
 
 #ifdef MPAS_CAM_DYCORE
@@ -137,22 +136,16 @@ module atm_time_integration
       call mpas_pool_get_subpool(domain % blocklist % structs, 'diag', diag)
       call mpas_pool_get_array(diag, 'rho_base', rho_base)
       call mpas_pool_get_array(diag, 'theta_base', theta_base)
-      rho_base_min = minval(rho_base(:,:))
-      rho_base_max = maxval(rho_base(:,:))
-      theta_base_min = minval(theta_base(:,:))
-      theta_base_max = maxval(theta_base(:,:))
 
-      reference_state_active = .true.
-      if( (rho_base_min == 0.)   .and. &
-          (rho_base_max == 0.)   .and. &
-          (theta_base_min == 0.) .and. &
-          (theta_base_max == 0.) )  then
 
+      if (all(rho_base(:,:) == 0.0) .and. all(theta_base(:,:) == 0.0)) then
          reference_state_active = .false.
-         call mpas_log_write('--- full variable integration, reference state is zero ')
-      else
-         call mpas_log_write('--- perturbation state integration, reference state is non-zero ')
+         call mpas_log_write('--- full variable integration, reference state is zero')
+      else  
+         reference_state_active = .true.
+         call mpas_log_write('--- perturbation state integration, reference state is non-zero')
       end if
+
 
    end subroutine mpas_atm_dynamics_init
 
