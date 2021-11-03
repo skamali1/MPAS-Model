@@ -2165,19 +2165,22 @@ module atm_time_integration
             coftz(k,iCell) = dtseps*   (fzm(k)*t (k,iCell)+fzp(k)*t (k-1,iCell))
          end do
          coftz(nVertLevels+1,iCell) = 0.0
+         if(reference_state_active) then
 !DIR$ IVDEP
-         do k=1,nVertLevels
-
+            do k=1,nVertLevels
 !            qtotal = 0.
 !            do iq = moist_start, moist_end
 !               qtotal = qtotal + scalars(iq, k, iCell)
 !            end do
-            qtotal = qtot(k,iCell)
-
-            cofwt(k,iCell) = .5*dtseps*rcv*zz(k,iCell)*gravity*rb(k,iCell)/(1.+qtotal)  &
+               qtotal = qtot(k,iCell)
+               cofwt(k,iCell) = .5*dtseps*rcv*zz(k,iCell)*gravity*rb(k,iCell)/(1.+qtotal)  &
                                 *p(k,iCell)/((rtb(k,iCell)+rt(k,iCell))*pb(k,iCell))
 !            cofwt(k,iCell) = 0.
-         end do
+            end do
+         else
+            cofwt(:,:) = 0.0
+         endif
+
 
          a_tri(1,iCell) = 0.  ! note, this value is never used
          b_tri(1) = 1.    ! note, this value is never used
@@ -6029,6 +6032,7 @@ module atm_time_integration
          end do
       end do
 
+
       do iCell=cellStart,cellEnd
          do k=1,nVertLevels
             rtheta_base(k,iCell) = theta_base(k,iCell) * rho_base(k,iCell)
@@ -6045,9 +6049,14 @@ module atm_time_integration
       do iCell=cellStart,cellEnd
          do k=1,nVertLevels
             exner(k,iCell) = (zz(k,iCell) * (rgas/p0) * (rtheta_p(k,iCell) + rtheta_base(k,iCell)))**rcv
-            exner_base(k,iCell) = (zz(k,iCell) * (rgas/p0) * (rtheta_base(k,iCell)))**rcv  ! WCS addition 20180403
+            if (rtheta_base(k, iCell) == 0.0) then
+               exner_base(k, iCell) = 0.0
+            else
+               exner_base(k,iCell) = (zz(k,iCell) * (rgas/p0) * (rtheta_base(k,iCell)))**rcv  ! WCS addition 20180403
+            endif
          end do
       end do
+
 
       do iCell=cellStart,cellEnd
          do k=1,nVertLevels
