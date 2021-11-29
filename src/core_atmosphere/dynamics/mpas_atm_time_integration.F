@@ -4724,6 +4724,8 @@ module atm_time_integration
 
       real (kind=RKIND), dimension( nVertLevels ) :: rayleigh_damp_coef
 
+      logical, parameter :: ln_p_formulation = .true.  !added for log(p)
+
       real (kind=RKIND) :: flux3, flux4
       real (kind=RKIND) :: q_im2, q_im1, q_i, q_ip1, ua, coef3
 
@@ -4854,12 +4856,20 @@ module atm_time_integration
          ! horizontal pressure gradient 
 
          if(rk_step == 1) then
+           if(ln_p_formulation) then  
 !DIR$ IVDEP
-            do k=1,nVertLevels
+             do k=1,nVertLevels
+                tend_u_euler(k,iEdge) =  - cqu(k,iEdge)*( (pp(k,cell2)+pp(k,cell1))*(log(pp(k,cell2))-log(pp(k,cell1)))  &
+                                                             *invDcEdge(iEdge)/((zz(k,cell2)+zz(k,cell1)))               &
+                                                                -0.5*zxu(k,iEdge)*(dpdz(k,cell1)+dpdz(k,cell2)) )
+             end do 
+           else   
+!DIR$ IVDEP
+             do k=1,nVertLevels
                tend_u_euler(k,iEdge) =  - cqu(k,iEdge)*( (pp(k,cell2)-pp(k,cell1))*invDcEdge(iEdge)/(.5*(zz(k,cell2)+zz(k,cell1))) &
                                               -0.5*zxu(k,iEdge)*(dpdz(k,cell1)+dpdz(k,cell2)) )
-            end do
-
+             end do
+           endif  
          end if
 
          ! vertical transport of u
@@ -5261,14 +5271,24 @@ module atm_time_integration
          end do
 
          if(rk_step == 1) then
+           if( ln_p_formulation) then  
 !DIR$ IVDEP
-            do k=2,nVertLevels
-              tend_w_euler(k,iCell) = tend_w_euler(k,iCell) - cqw(k,iCell)*(   &
+             do k=2,nVertLevels
+              ! ln(p) formulation
+               tend_w_euler(k,iCell) = tend_w_euler(k,iCell) - cqw(k,iCell)*(   &
+                                           rdzu(k)*(fzm(k)*pp(k,iCell)+fzp(k)*pp(k-1,iCell))*(log(pp(k,iCell))-log(pp(k-1,iCell))) &
+                                         - (fzm(k)*dpdz(k,iCell) + fzp(k)*dpdz(k-1,iCell)) )  ! dpdz is the buoyancy term here.
+             end do 
+           else ! standard pressure gradient formulation
+!DIR$ IVDEP
+             do k=2,nVertLevels
+               tend_w_euler(k,iCell) = tend_w_euler(k,iCell) - cqw(k,iCell)*(   &
                                            rdzu(k)*(pp(k,iCell)-pp(k-1,iCell)) &
                                          - (fzm(k)*dpdz(k,iCell) + fzp(k)*dpdz(k-1,iCell)) )  ! dpdz is the buoyancy term here.
-            end do
-          end if
-
+             end do
+           end if 
+         end if
+         
       end do
 
       if (rk_step == 1) then
