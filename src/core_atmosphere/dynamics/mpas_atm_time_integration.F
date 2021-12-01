@@ -4724,7 +4724,7 @@ module atm_time_integration
 
       real (kind=RKIND), dimension( nVertLevels ) :: rayleigh_damp_coef
 
-      logical, parameter :: ln_p_formulation = .true.  !added for log(p)
+      logical :: ln_p_formulation != .true.  !added for log(p)
 
       real (kind=RKIND) :: flux3, flux4
       real (kind=RKIND) :: q_im2, q_im1, q_i, q_ip1, ua, coef3
@@ -4743,6 +4743,12 @@ module atm_time_integration
 
        v_mom_eddy_visc2   = config_v_mom_eddy_visc2
        v_theta_eddy_visc2 = config_v_theta_eddy_visc2
+
+      if(reference_state_active) then
+         ln_p_formulation = .false.
+      else
+        ln_p_formulation = .true.
+      end if
 
       if (rk_step == 1) then
 
