@@ -4648,6 +4648,22 @@ module atm_time_integration
       real (kind=RKIND) :: kdiffu, z1, z2, z3, z4, zm, z0, zp, rayleigh_coef_inverse
 
       real (kind=RKIND), dimension( nVertLevels ) :: rayleigh_damp_coef
+!------------------------------------------------------------------------------------
+!SK  - Define the new 1-D arrays for the viscosity and hypervsicosity and height
+     real (kind=RKIND), dimension( nVertLevels )   :: Height_u_levels
+     real (kind=RKIND), dimension( nVertLevels+1 ) :: Height_w_levels
+     real (kind=RKIND), dimension( nVertLevels )   :: hyp_visc_coeff
+!     real (kind=RKIND), dimension( nVertLevels ) :: hyp_visc_tetta
+!     real (kind=RKIND), dimension( nVertLevels ) :: hyp_visc_w
+!     real (kind=RKIND), dimension( nVertLevels ) :: hyp_visc_mom_div
+!     real (kind=RKIND), dimension( nVertLevels ) :: hyp_visc_mom_vort
+      real (kind=RKIND), dimension( nVertLevels ) :: visc_coeff
+      real (kind=RKIND) :: lower_hyp_visc, upper_hyp_visc
+      real (kind=RKIND) :: lower_visc, upper_visc
+      real (kind=RKIND) :: transition_center, transition_width
+      integer ::  ilevel
+
+!------------------------------------------------------------------------------------
 
       real (kind=RKIND) :: flux3, flux4
       real (kind=RKIND) :: q_im2, q_im1, q_i, q_ip1, ua, coef3
@@ -4668,6 +4684,31 @@ module atm_time_integration
        v_theta_eddy_visc2 = config_v_theta_eddy_visc2
 
       if (rk_step == 1) then
+
+!---------------------------------------------------------------------------------------------
+!SK - Call the subroutines to calculate the height
+! and the viscosity and hyperviscosity damping coeff for each level
+!initialization  
+         lower_hyp_visc    = 1.e+14
+         upper_hyp_visc    = 5.e+15
+         lower_visc        =  0.0_RKIND
+         upper_visc        =   5.e+5
+         transition_center = 90000.0_RKIND ! if debugging inside of MPAS this will have to be changed (Model top 30K)
+         transition_width  = 20000.0_RKIND ! if debugging inside of MPAS this will have to be changed (Model top 30K)
+
+
+         call calculate_computational_height(nVertLevels,rdzw, height_u_levels, height_w_levels)
+         do ilevel =1, nVertLevels+1
+             call mpas_log_write('test $i $r $r $r $r $r', intARgs=(/ilevel/),realArgs=(/height_u_levels(ilevel),&
+                                     &zgrid(ilevel, 88),zgrid(ilevel, 35),height_w_levels(ilevel),height_w_levels(ilevel+1)/))
+         enddo
+         call calculate_damp_coeff(nVertLevels,height_u_levels, lower_hyp_visc,&
+                             & upper_hyp_visc, transition_width,transition_center,hyp_visc_coeff)
+         call calculate_damp_coeff(nVertLevels,height_u_levels,lower_visc,&
+                              &upper_visc , transition_width,transition_center,visc_coeff)
+ 
+!---------------------------------------------------------------------------------------------
+
 
 !         tend_u_euler(1:nVertLevels,edgeStart:edgeEnd) = 0.0
 
@@ -4712,9 +4753,15 @@ module atm_time_integration
                ! 2nd-order filter for top absorbing layer as in CAM-SE :  WCS 10 May 2017
                ! From MPAS-CAM V4.0 code, with addition to config-specified coefficient (V4.0_coef = 0.2; SE_coef = 1.0)
                !
-               kdiff(nVertLevels-2,iCell) = max(kdiff(nVertLevels-2,iCell),    2.0833*config_len_disp*config_mpas_cam_coef)
-               kdiff(nVertLevels-1,iCell) = max(kdiff(nVertLevels-1,iCell),2.0*2.0833*config_len_disp*config_mpas_cam_coef)
-               kdiff(nVertLevels  ,iCell) = max(kdiff(nVertLevels  ,iCell),4.0*2.0833*config_len_disp*config_mpas_cam_coef)
+!------------------------------------------------------------------------------------------------------
+!SK - replace below with the new 1-D viscosity dampoing coeff for each level, needed to add a k loop here
+! before:               kdiff(nVertLevels-2,iCell) = max(kdiff(nVertLevels-2,iCell),    2.0833*config_len_disp*config_mpas_cam_coef)
+! before:              kdiff(nVertLevels-1,iCell) = max(kdiff(nVertLevels-1,iCell),2.0*2.0833*config_len_disp*config_mpas_cam_coef)
+! before:              kdiff(nVertLevels  ,iCell) = max(kdiff(nVertLevels  ,iCell),4.0*2.0833*config_len_disp*config_mpas_cam_coef)
+              do k = 1, nVertLevels
+                     kdiff(k,iCell) = max(kdiff(k,iCell),visc_coeff(k))!    2.0833*config_len_disp*config_mpas_cam_coef)
+              enddo
+!----------------------------------------------------------------------------------------------------------------
             end do
 
          end if
@@ -4919,8 +4966,12 @@ module atm_time_integration
                cell2 = cellsOnEdge(2,iEdge)
                vertex1 = verticesOnEdge(1,iEdge)
                vertex2 = verticesOnEdge(2,iEdge)
-
-               u_mix_scale = meshScalingDel4(iEdge)*h_mom_eddy_visc4
+!--------------------------------------------------
+! SK - removed the h_mom_eddy_visc4 factor in the u_mix_scale. Later in the k loop we will add that in the form 
+!     of hyp_visc_coeff(k).
+!    before:           u_mix_scale = meshScalingDel4(iEdge)*h_mom_eddy_visc4
+               u_mix_scale = meshScalingDel4(iEdge)
+!---------------------------------------------------------------------
                r_dc = u_mix_scale * config_del4u_div_factor * invDcEdge(iEdge)
                r_dv = u_mix_scale * min(invDvEdge(iEdge), 4*invDcEdge(iEdge))
 
@@ -4934,8 +4985,13 @@ module atm_time_integration
                   !    relative to the rotational part.  The stability constraint on the divergence component is much less
                   !    stringent than the rotational part, and this flexibility may be useful.
                   !
-                  u_diffusion =  rho_edge(k,iEdge) *  ( ( delsq_divergence(k,cell2)  - delsq_divergence(k,cell1) ) * r_dc  &
-                                                       -( delsq_vorticity(k,vertex2) - delsq_vorticity(k,vertex1) ) * r_dv )
+!----------------------------------------------------------------------------------
+! SK - Multiplied the hyp_visc_coeff(k) factor in r_dc and r_dv here
+! before:                 u_diffusion =  rho_edge(k,iEdge) *  ( ( delsq_divergence(k,cell2)  - delsq_divergence(k,cell1) ) * r_dc  &
+!                                                       -( delsq_vorticity(k,vertex2) - delsq_vorticity(k,vertex1) ) * r_dv )
+                  u_diffusion =  rho_edge(k,iEdge) *  ( ( delsq_divergence(k,cell2)  - delsq_divergence(k,cell1) ) * hyp_visc_coeff(k)*r_dc  &
+                                                       -( delsq_vorticity(k,vertex2) - delsq_vorticity(k,vertex1) ) * hyp_visc_coeff(k)*r_dv )
+!----------------------------------------------------------------------------
                   tend_u_euler(k,iEdge) = tend_u_euler(k,iEdge) - u_diffusion
                   
                end do
@@ -5134,7 +5190,11 @@ module atm_time_integration
          if (h_mom_eddy_visc4 > 0.0) then  ! 4th order mixing is active
 
             do iCell=cellSolveStart,cellSolveEnd    ! Technically updating fewer cells than before...
-               r_areaCell = h_mom_eddy_visc4 * invAreaCell(iCell)
+!--------------------------------------------
+! SK - Removed the h_mom_eddy_visc4 factor
+! before:     r_areaCell = h_mom_eddy_visc4 * invAreaCell(iCell)
+              r_areaCell = invAreaCell(iCell)
+!-------------------------------------------------
                do i=1,nEdgesOnCell(iCell)
                   iEdge = edgesOnCell(i,iCell)
                   cell1 = cellsOnEdge(1,iEdge)
@@ -5143,7 +5203,12 @@ module atm_time_integration
                   edge_sign = meshScalingDel4(iEdge)*r_areaCell*dvEdge(iEdge)*edgesOnCell_sign(i,iCell) * invDcEdge(iEdge)
 
                   do k=2,nVertLevels
-                     tend_w_euler(k,iCell) = tend_w_euler(k,iCell) - edge_sign * (delsq_w(k,cell2) - delsq_w(k,cell1))
+!-----------------------------------------------------------------------
+!SK - Added hyp_visc_coeff
+!    before                 tend_w_euler(k,iCell) = tend_w_euler(k,iCell) - edge_sign * (delsq_w(k,cell2) - delsq_w(k,cell1))
+                 tend_w_euler(k,iCell) = tend_w_euler(k,iCell)&
+                     & - 0.5_RKIND*(hyp_visc_coeff(k-1)+hyp_visc_coeff(k))*edge_sign * (delsq_w(k,cell2) - delsq_w(k,cell1))
+!------------------------------------------------------------------------------
                   end do
            
                end do
@@ -5305,7 +5370,11 @@ module atm_time_integration
          if (h_theta_eddy_visc4 > 0.0) then  ! 4th order mixing is active
 
             do iCell=cellSolveStart,cellSolveEnd    ! Technically updating fewer cells than before...
-               r_areaCell = h_theta_eddy_visc4 * prandtl_inv * invAreaCell(iCell)
+!---------------------------------------------------------------
+!SK - Removed h_theta_eddy_visc4 factor
+! before               r_areaCell = h_theta_eddy_visc4 * prandtl_inv * invAreaCell(iCell)
+               r_areaCell = prandtl_inv * invAreaCell(iCell)
+!---------------------------------------------------------------------------
                do i=1,nEdgesOnCell(iCell)
 
                   iEdge = edgesOnCell(i,iCell)
@@ -5315,7 +5384,12 @@ module atm_time_integration
                   cell2 = cellsOnEdge(2,iEdge)
 
                   do k=1,nVertLevels
-                     tend_theta_euler(k,iCell) = tend_theta_euler(k,iCell) - edge_sign*(delsq_theta(k,cell2) - delsq_theta(k,cell1))
+!--------------------------------------------
+!SK - Added the hyp_visc_coeff factore here
+! before:             tend_theta_euler(k,iCell) = tend_theta_euler(k,iCell) - edge_sign*(delsq_theta(k,cell2) - delsq_theta(k,cell1))
+                       tend_theta_euler(k,iCell) = tend_theta_euler(k,iCell)&
+                         & - hyp_visc_coeff(k)*edge_sign*(delsq_theta(k,cell2) - delsq_theta(k,cell1))
+
                   end do
                end do
             end do
@@ -7017,4 +7091,71 @@ module atm_time_integration
 
    end subroutine summarize_timestep
 
+
+!----------------------------SK added this for the changes in the absorbing layer
+!input rdzw , nVertLevels, 
+!outputs is computational heights for w and u
+  subroutine calculate_computational_height(nVertLevels,rdzw,height_u_levels, height_w_levels)
+     integer, intent(in) ::  nVertLevels
+     real (kind=RKIND), dimension( nVertLevels ), intent(in) ::  rdzw
+     real (kind=RKIND), dimension( nVertLevels ), intent(out) :: height_u_levels
+     real (kind=RKIND), dimension( nVertLevels+1 ), intent(out) :: height_w_levels
+
+!define variables
+     integer k
+!initialization
+     height_w_levels(:) = 0.0_RKIND
+
+!calculate the computational height at u and w levels
+     do k =1, nVertLevels
+       height_w_levels(k+1) = height_w_levels(k) + 1.0_RKIND/rdzw(k)
+       height_u_levels(k) = 0.5*(height_w_levels(k+1) + height_w_levels(k))
+     enddo    
+  end subroutine calculate_computational_height
+
+
+! calculates the viscosity dampings
+!input is heights, the location of the transtion and the width of the transition
+!outputs are either viscosity or hyperviscosity damping factors
+   subroutine calculate_damp_coeff(nVertLevels,height_u_levels, min_coeff,&
+                             & max_coeff, transition_width, transition_point,damp_coeff)
+         integer, intent(in)::nVertLevels
+         real (kind=RKIND) :: max_coeff, min_coeff, transition_width, transition_point
+         real (kind=RKIND), dimension(nVertLevels), intent (in) :: height_u_levels
+!         real (kind=RKIND), dimension(nVertLevels+1), intent (in) :: height_w_levels
+         real (kind=RKIND), dimension(nVertLevels), intent (out) :: damp_coeff
+
+! local parameters
+         integer :: k, counter_transition
+         real (kind=RKIND) :: dx,x, transition_lower_bound, transition_upper_bound
+! initialization
+         damp_coeff = 0.0_RKIND
+         counter_transition = 0
+         dx = 0.0_RKIND
+         x = -pii/2.0_RKIND
+         transition_lower_bound = transition_point - transition_width*0.5_RKIND
+         transition_upper_bound = transition_point + transition_width*0.5_RKIND
+
+! calculate how many levels are in the transition region
+         do k =1, nVertLevels
+            if(((height_u_levels(k)-transition_lower_bound)>= 0.0_RKIND).and.((height_u_levels(k)-transition_upper_bound)<=0.0_RKIND)) then
+                  counter_transition = counter_transition +1
+            endif
+         enddo
+         dx = pii/REAL(counter_transition-1)
+         call mpas_log_write('check $i $r $r $r $r', intARgs=(/counter_transition/),realArgs=(/dx,x,transition_lower_bound,transition_upper_bound/))
+! start calculating the hyperviscosities
+         do k =1, nVertLevels
+           if((height_u_levels(k)-transition_lower_bound) < 0.0_RKIND ) then
+               damp_coeff(k)= min_coeff      
+           elseif((height_u_levels(k)-transition_upper_bound) > 0.0_RKIND ) then
+               damp_coeff(k) =max_coeff
+           else
+               damp_coeff(k) = min_coeff+ (sin(x)+1)*0.5_RKIND*(max_coeff-min_coeff)
+               x = x + dx
+           endif
+           call mpas_log_write('hyp_vis $i $r $r', intARgs=(/k/),realArgs=(/damp_coeff(k), height_u_levels(k)/))
+         enddo
+
+   end subroutine calculate_damp_coeff
 end module atm_time_integration
